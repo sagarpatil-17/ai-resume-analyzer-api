@@ -18,15 +18,17 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private config: ConfigService,
-  ) {}
+  ) { }
 
   private async createToken(user: {
     id: string;
     email: string;
+    name:string;
   }) {
     const accessToken = await this.jwt.signAsync({
       sub: user.id,
-      email: user.email
+      email: user.email,
+      name: user.name
     });
 
     return {
@@ -86,7 +88,8 @@ export class AuthService {
 
     return this.createToken({
       id: user.id,
-      email: user.email
+      email: user.email,
+      name: user.name
     });
   }
 
