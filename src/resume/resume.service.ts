@@ -351,16 +351,21 @@ ${jobDescription}
       attempt++
     ) {
       try {
+
         const response = await this.ai.models.generateContent({
           model: this.model,
           contents: prompt,
-          ...(jsonResponse
-            ? {
-                config: {
-                  responseMimeType: 'application/json',
-                },
+          config: {
+            maxOutputTokens: 300,
+            httpOptions: {
+              timeout: 30_000,
+            },
+            ...(jsonResponse
+              ? {
+                responseMimeType: 'application/json',
               }
-            : {}),
+              : {}),
+          },
         });
 
         const responseText = response.text?.trim();
