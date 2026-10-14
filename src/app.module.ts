@@ -1,12 +1,15 @@
 import { Module } from '@nestjs/common';
 import { ResumeModule } from './resume/resume.module';
 import { ConfigModule } from '@nestjs/config';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true
     }),
-    ResumeModule],
+    AuthModule,
+    ResumeModule
+  ],
 })
 export class AppModule { }

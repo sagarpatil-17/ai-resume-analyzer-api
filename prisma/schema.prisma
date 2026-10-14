@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+}
+
+enum ChatRole {
+  USER
+  MODEL
+}
+
+model users {
+  id       String     @id @default(auto()) @map("_id") @db.ObjectId
+  name     String
+  email    String     @unique
+  password String
+  status   UserStatus @default(ACTIVE)
+
+  analyses resume_analysis[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model resume_analysis {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  originalFilename String
+  resumeText       String
+  jobDescription   String
+
+  matchScore     Int
+  summary        String
+  matchingSkills String[]
+  missingSkills  String[]
+  strengths      String[]
+  improvements   String[]
+
+  userId String @db.ObjectId
+  user   users   @relation(fields: [userId], references: [id])
+
+  chatMessages ChatMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, createdAt])
+}
+
+model ChatMessage {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  analysisId String          @db.ObjectId
+  analysis   resume_analysis @relation(fields: [analysisId], references: [id])
+
+  role    ChatRole
+  content String
+
+  createdAt DateTime @default(now())
+
+  @@index([analysisId, createdAt])
+}
