@@ -78,16 +78,10 @@ export class ResumeService {
       this.configService.getOrThrow<string>('NVIDIA_API_KEY');
 
     this.apiUrl = (
-      this.configService.get<string>(
-        'NVIDIA_BASE_URL',
-        'https://integrate.api.nvidia.com/v1',
-      )
-    ).replace(/\/+$/, '');
-
-    this.model = this.configService.get<string>(
-      'NVIDIA_MODEL',
-      'nvidia/nemotron-3.5-lightning-30b-a3b',
+      this.configService.getOrThrow<string>('NVIDIA_BASE_URL')
     );
+
+    this.model = this.configService.getOrThrow<string>('NVIDIA_MODEL');
   }
 
   // ==========================================
