@@ -353,15 +353,18 @@ ${jobDescription}
   // NEMOTRON API WITH RETRIES
   // ==========================================
 
+
   private async generateWithRetry(
     prompt: string,
     jsonResponse = false,
   ): Promise<string> {
     const maxAttempts = 3;
+    const retryableStatuses = [408, 429, 500, 502, 503, 504];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       let response: Response;
 
+      // 1. Send the request to NVIDIA.
       try {
         response = await fetch(
           `${this.apiUrl}/chat/completions`,
@@ -391,14 +394,17 @@ ${jobDescription}
             }),
           },
         );
-      } catch (error) {
-        const isLastAttempt = attempt === maxAttempts;
+      } catch (error: unknown) {
+        const detail =
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : String(error);
 
         this.logger.warn(
-          `NVIDIA request failed on attempt ${attempt}/${maxAttempts}.`,
+          `NVIDIA network/request failure ${attempt}/${maxAttempts}: ${detail}`,
         );
 
-        if (isLastAttempt) {
+        if (attempt === maxAttempts) {
           throw new ServiceUnavailableException(
             'The AI service is temporarily unavailable. Please try again shortly.',
           );
@@ -408,81 +414,93 @@ ${jobDescription}
         continue;
       }
 
+      // 2. Handle unsuccessful HTTP responses.
       if (!response.ok) {
-        const retryableStatuses = [
-          429, 500, 502, 503, 504,
-        ];
+        const status = response.status;
 
-        const isRetryable = retryableStatuses.includes(
-          response.status,
-        );
+        // Read the provider's error body before discarding the response.
+        const rawBody = await response.text().catch(() => '');
+        const safeBody = rawBody.slice(0, 1500);
 
-        // Consume the response without exposing provider details.
-        await response.text().catch(() => '');
+        if (status === 401 || status === 403) {
+          this.logger.error(
+            `NVIDIA authentication/access failure: HTTP ${status}. ` +
+            `Response: ${safeBody}`,
+          );
+
+          throw new BadGatewayException(
+            'The AI provider rejected the request. Check your API key and model access.',
+          );
+        }
+
+        const isRetryable = retryableStatuses.includes(status);
 
         if (isRetryable && attempt < maxAttempts) {
           this.logger.warn(
-            `NVIDIA returned HTTP ${response.status}; retrying (${attempt}/${maxAttempts}).`,
+            `NVIDIA returned HTTP ${status} on attempt ${attempt}/${maxAttempts}. ` +
+            `Response: ${safeBody}`,
           );
 
           await this.waitBeforeRetry(attempt);
           continue;
         }
 
+        this.logger.error(
+          `NVIDIA HTTP failure: status=${status}, ` +
+          `attempt=${attempt}/${maxAttempts}, response=${safeBody}`,
+        );
+
         if (isRetryable) {
           throw new ServiceUnavailableException(
-            'The AI service is temporarily busy. Please try again shortly.',
+            'The AI service is temporarily unavailable. Please try again shortly.',
           );
         }
-
-        if (
-          response.status === 401 ||
-          response.status === 403
-        ) {
-          this.logger.error(
-            `NVIDIA rejected the request with HTTP ${response.status}. Check the API key and account access.`,
-          );
-
-          throw new BadGatewayException(
-            'The AI provider rejected the API credentials. Check your NVIDIA API key and model access.',
-          );
-        }
-
-        this.logger.error(
-          `NVIDIA request failed with HTTP ${response.status}.`,
-        );
 
         throw new BadGatewayException(
           'The AI provider could not process the request.',
         );
       }
 
+      // 3. Parse the successful response.
       let data: NvidiaChatResponse;
 
       try {
         data = (await response.json()) as NvidiaChatResponse;
-      } catch {
-        this.logger.warn('NVIDIA returned an unreadable response.');
+      } catch (error: unknown) {
+        const detail =
+          error instanceof Error ? error.message : String(error);
+
+        this.logger.warn(
+          `Invalid NVIDIA JSON response on attempt ${attempt}/${maxAttempts}: ${detail}`,
+        );
 
         if (attempt < maxAttempts) {
           await this.waitBeforeRetry(attempt);
           continue;
         }
 
-        throw new ServiceUnavailableException(
-          'The AI provider returned an invalid response. Please try again.',
+        throw new BadGatewayException(
+          'The AI provider returned an invalid response.',
         );
       }
 
-      const responseText = data.choices?.[0]?.message?.content;
+      // 4. Extract the generated text.
+      const choice = data.choices?.[0];
+      const responseText = choice?.message?.content;
 
       if (
         typeof responseText !== 'string' ||
         !responseText.trim()
       ) {
         this.logger.warn(
-          `NVIDIA returned no usable text. finish_reason=${data.choices?.[0]?.finish_reason ?? 'unknown'}`,
+          `NVIDIA returned no usable text on attempt ${attempt}/${maxAttempts}. ` +
+          `finish_reason=${choice?.finish_reason ?? 'unknown'}`,
         );
+
+        if (attempt < maxAttempts) {
+          await this.waitBeforeRetry(attempt);
+          continue;
+        }
 
         throw new ServiceUnavailableException(
           'The AI provider returned no usable content. Please try again.',
@@ -496,6 +514,7 @@ ${jobDescription}
       'Unable to generate an AI response. Please try again.',
     );
   }
+
 
   private async waitBeforeRetry(attempt: number): Promise<void> {
     const delayMs = attempt * 2000;
